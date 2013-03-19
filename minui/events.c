@@ -25,6 +25,10 @@
 #include "minui.h"
 #include "cutils/log.h"
 
+#ifdef USE_EVENTS_REMAP
+#include "events_remap.h"
+#endif
+
 #define MAX_DEVICES 16
 #define MAX_MISC_FDS 16
 
@@ -37,6 +41,9 @@
 struct fd_info {
     ev_callback cb;
     void *data;
+#ifdef USE_EVENTS_REMAP
+    events_remap_map *map;
+#endif
 };
 
 static struct pollfd ev_fds[MAX_DEVICES + MAX_MISC_FDS];
@@ -51,6 +58,32 @@ int ev_init(ev_callback input_cb, void *data)
     DIR *dir;
     struct dirent *de;
     int fd;
+
+#ifdef USE_EVENTS_REMAP
+    char *device = NULL;
+    events_remap_map *map;
+
+    char *s, *token, cmdline[1024] = "";
+
+    if ( (fd = open("/proc/cmdline", O_RDONLY)) >= 0) {
+        ssize_t readed = read(fd, cmdline, sizeof(cmdline));
+        if (readed >= 0) {
+            cmdline[readed] = '\0';
+            if ( (readed > 0) && (cmdline[--readed] == '\n') ) {
+                cmdline[readed] = '\0';
+            }
+        }
+        close(fd);
+    }
+
+    s = strtok_r(cmdline, " ", &token);
+    while (s) {
+        if (strncmp(s, "DEVICE=", 7) == 0) {
+            device = s + 7;
+        }
+        s = strtok_r(NULL, " ", &token);
+    }
+#endif
 
     dir = opendir("/dev/input");
     if(dir != 0) {
@@ -79,6 +112,9 @@ int ev_init(ev_callback input_cb, void *data)
             ev_fds[ev_count].events = POLLIN;
             ev_fdinfo[ev_count].cb = input_cb;
             ev_fdinfo[ev_count].data = data;
+#ifdef USE_EVENTS_REMAP
+            ev_fdinfo[ev_count].map = events_remap_find(device, fd);
+#endif
             ev_count++;
             ev_dev_count++;
             if(ev_dev_count == MAX_DEVICES) break;
@@ -97,6 +133,9 @@ int ev_add_fd(int fd, ev_callback cb, void *data)
     ev_fds[ev_count].events = POLLIN;
     ev_fdinfo[ev_count].cb = cb;
     ev_fdinfo[ev_count].data = data;
+#ifdef USE_EVENTS_REMAP
+    ev_fdinfo[ev_count].map = events_remap_find(NULL, fd);
+#endif
     ev_count++;
     ev_misc_count++;
     return 0;
@@ -105,6 +144,12 @@ int ev_add_fd(int fd, ev_callback cb, void *data)
 void ev_exit(void)
 {
     while (ev_count > 0) {
+#ifdef USE_EVENTS_REMAP
+        if (ev_fdinfo[ev_count].map) {
+            free(ev_fdinfo[ev_count].map);
+            ev_fdinfo[ev_count].map = NULL;
+        }
+#endif
         close(ev_fds[--ev_count].fd);
     }
     ev_misc_count = 0;
@@ -133,14 +178,46 @@ void ev_dispatch(void)
     }
 }
 
+#ifdef USE_EVENTS_REMAP
+static void _check_ev_remap(int fd, struct input_event *ev)
+{
+    int n, i, code;
+    events_remap_map *map;
+
+    if (ev->type != EV_KEY || ev->code > KEY_MAX)
+        return;
+
+    code = ev->code;
+
+    for (n = 0; n < ev_count; n++) {
+        if (ev_fds[n].fd == fd) {
+            map = ev_fdinfo[n].map;
+            if (map) {
+                for (i = 0; (i < EVENTS_REMAP_MAX_KEYS) && ( (*map)[i].id >= 0 ); i++) {
+                    if ( code == (*map)[i].id ) {
+                        ev->code == (*map)[i].override;
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+    }
+}
+#endif
+
 int ev_get_input(int fd, short revents, struct input_event *ev)
 {
     int r;
 
     if (revents & POLLIN) {
         r = read(fd, ev, sizeof(*ev));
-        if (r == sizeof(*ev))
+        if (r == sizeof(*ev)) {
+#ifdef USE_EVENTS_REMAP
+            _check_ev_remap(fd, ev);
+#endif
             return 0;
+        }
     }
     return -1;
 }

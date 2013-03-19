@@ -46,11 +46,14 @@ int device_handle_key(int key_code, int visible) {
             case KEY_CAMERA:
             case KEY_F21:
             case KEY_SEND:
+            case KEY_RIGHT:
                 return SELECT_ITEM;
-            
+
             case KEY_END:
             case KEY_BACKSPACE:
             case KEY_SEARCH:
+            case BTN_RIGHT:
+            case KEY_LEFT:
                 if (ui_get_showing_back_button()) {
                     return SELECT_ITEM;
                 }

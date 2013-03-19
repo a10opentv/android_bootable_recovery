@@ -402,6 +402,23 @@ static int input_callback(int fd, short revents, void *data)
     if (ev.type == EV_SYN) {
         return 0;
     } else if (ev.type == EV_REL) {
+        if (ev.code == REL_WHEEL) {
+            if (ev.value < 0) {
+                fake_key = 1;
+                ev.type = EV_KEY;
+                ev.code = KEY_DOWN;
+                ev.value = 1;
+                rel_sum = 0;
+            } else {
+                fake_key = 1;
+                ev.type = EV_KEY;
+                ev.code = KEY_UP;
+                ev.value = 1;
+                rel_sum = 0;
+            }
+        }
+        #if 0
+        else
         if (ev.code == REL_Y) {
             // accumulate the up or down motion reported by
             // the trackball.  When it exceeds a threshold
@@ -422,6 +439,7 @@ static int input_callback(int fd, short revents, void *data)
                 rel_sum = 0;
             }
         }
+        #endif
     } else {
         rel_sum = 0;
     }
